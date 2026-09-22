@@ -20,6 +20,139 @@ MAX_OPS = 20_000_000
 MAX_N = 1_000_000
 
 
+class Stack:
+    """LIFO collection backed by a Python list."""
+
+    def __init__(self, values=()):
+        self._items = list(values)
+
+    def push(self, value):
+        self._items.append(value)
+
+    def pop(self):
+        if not self._items:
+            raise IndexError("pop from empty stack")
+        return self._items.pop()
+
+    def peek(self):
+        if not self._items:
+            raise IndexError("peek from empty stack")
+        return self._items[-1]
+
+    def is_empty(self):
+        return not self._items
+
+    def __len__(self):
+        return len(self._items)
+
+    def to_list(self):
+        return list(self._items)
+
+
+class Queue:
+    """FIFO collection backed by a list and a moving front index."""
+
+    def __init__(self, values=()):
+        self._items = list(values)
+        self._front = 0
+
+    def enqueue(self, value):
+        self._items.append(value)
+
+    def dequeue(self):
+        if self.is_empty():
+            raise IndexError("dequeue from empty queue")
+        value = self._items[self._front]
+        self._front += 1
+        if self._front == len(self._items):
+            self._items = []
+            self._front = 0
+        return value
+
+    def peek(self):
+        if self.is_empty():
+            raise IndexError("peek from empty queue")
+        return self._items[self._front]
+
+    def is_empty(self):
+        return self._front == len(self._items)
+
+    def __len__(self):
+        return len(self._items) - self._front
+
+    def to_list(self):
+        return list(self._items[self._front:])
+
+
+def stack_push_pop(n):
+    stack = Stack()
+    ops = 0
+    for value in range(n):
+        stack.push(value)
+        ops += 1
+    while not stack.is_empty():
+        stack.pop()
+        ops += 1
+    return ops
+
+
+def stack_search(data, target):
+    ops = 0
+    while not data.is_empty():
+        ops += 1
+        if data.pop() == target:
+            break
+    return ops
+
+
+def stack_reverse(data):
+    values = []
+    ops = 0
+    while not data.is_empty():
+        values.append(data.pop())
+        ops += 1
+    for value in values:
+        data.push(value)
+        ops += 1
+    return ops
+
+
+def queue_enqueue_dequeue(n):
+    queue = Queue()
+    ops = 0
+    for value in range(n):
+        queue.enqueue(value)
+        ops += 1
+    while not queue.is_empty():
+        queue.dequeue()
+        ops += 1
+    return ops
+
+
+def queue_search(data, target):
+    ops = 0
+    remaining = len(data)
+    while remaining:
+        value = data.dequeue()
+        ops += 1
+        remaining -= 1
+        if value == target:
+            break
+    return ops
+
+
+def queue_reverse(data):
+    values = []
+    ops = 0
+    while not data.is_empty():
+        values.append(data.dequeue())
+        ops += 1
+    for value in reversed(values):
+        data.enqueue(value)
+        ops += 1
+    return ops
+
+
 def linear_search(data, target):
     ops = 0
     for value in data:
@@ -298,7 +431,33 @@ def _shuffled(n):
     return data
 
 
+def _stack(n):
+    return Stack(range(n))
+
+
+def _queue(n):
+    return Queue(range(n))
+
+
 ALGORITHMS = {
+    "stack_push_pop": {
+        "run": stack_push_pop,
+        "complexity": "O(n)", "unit": "pushes + pops", "max_n": None},
+    "stack_search": {
+        "run": lambda n: stack_search(_stack(n), -1),
+        "complexity": "O(n)", "unit": "pops + comparisons", "max_n": None},
+    "stack_reverse": {
+        "run": lambda n: stack_reverse(_stack(n)),
+        "complexity": "O(n)", "unit": "pops + pushes", "max_n": None},
+    "queue_enqueue_dequeue": {
+        "run": queue_enqueue_dequeue,
+        "complexity": "O(n)", "unit": "enqueues + dequeues", "max_n": None},
+    "queue_search": {
+        "run": lambda n: queue_search(_queue(n), -1),
+        "complexity": "O(n)", "unit": "dequeues + comparisons", "max_n": None},
+    "queue_reverse": {
+        "run": lambda n: queue_reverse(_queue(n)),
+        "complexity": "O(n)", "unit": "dequeues + enqueues", "max_n": None},
     "linear_search": {
         "run": lambda n: linear_search(_sorted(n), -1),
         "complexity": "O(n)", "unit": "comparisons", "max_n": None},
