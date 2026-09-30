@@ -21,8 +21,8 @@ For a request such as `algo=linear_search&step=10&n_max=100`, the server:
 
 | File | Purpose |
 |---|---|
-| `server.py` | The Flask app. Defines `/analyze`, `/save_analysis`, `/analyses/<id>` and `/algorithms`, checks parameters, saves snapshots and builds the JSON response. |
-| `database.py` | SQLAlchemy engine, session factory and the `Analysis` model. Stores saved analyses in `analyses.db` (SQLite). |
+| `server.py` | The Flask app. Defines `/analyze`, `/register`, `/login`, `/save_analysis`, `/analyses/<id>` and `/algorithms`, checks parameters and JWTs, saves snapshots and builds the JSON response. |
+| `database.py` | SQLAlchemy engine, session factory and the `Analysis` and `User` models. Stores data in `analyses.db` (SQLite). |
 | `algorithms.py` | The algorithms you can time, registered in the `ALGORITHMS` dict. |
 | `Algorithm.py` | `time_complexity_visualizer(...)`. Times an algorithm over a range of input sizes and returns a matplotlib figure with the timings. |
 | `data_structures.py` | The `Stack` and `Queue` classes. |
@@ -92,6 +92,30 @@ Invalid requests get `400 Bad Request`:
 | `n_max` not a number | `{"error": "Query parameter 'n_max' must be an integer"}` |
 | `n_max` ≤ 0 | `{"error": "Query parameter 'n_max' must be greater than 0"}` |
 
+### `POST /register` and `POST /login`
+
+`/save_analysis` requires a JWT, so you first create an account and log in.
+Both endpoints take a JSON body with `username` and `password`.
+
+```bash
+curl -X POST http://localhost:8000/register \
+     -H "Content-Type: application/json" \
+     -d '{"username": "faber", "password": "secret"}'
+
+curl -X POST http://localhost:8000/login \
+     -H "Content-Type: application/json" \
+     -d '{"username": "faber", "password": "secret"}'
+# {"access_token": "eyJhbGciOi..."}
+```
+
+| Endpoint | Result |
+|---|---|
+| `/register` | `201` with the new user's `id`. `409` if the username is taken. `400` if either field is missing. |
+| `/login` | `200` with `access_token`. `401` if the username or password is wrong. |
+
+Passwords are stored as salted hashes, never as plain text. Tokens expire
+after one hour.
+
 ### `POST /save_analysis`
 
 Runs the same analysis as `/analyze` and stores the result in the database.
@@ -100,14 +124,42 @@ body or in the query string, and applies the same validation. On success it
 returns `201 Created` with the saved record, including its new `id` and
 `created_at`.
 
+The request must send the token from `/login` in the `Authorization` header
+as a Bearer token. A token in the query string or the body is ignored.
+
 ```bash
+TOKEN=$(curl -s -X POST http://localhost:8000/login \
+     -H "Content-Type: application/json" \
+     -d '{"username": "faber", "password": "secret"}' | python -c "import sys, json; print(json.load(sys.stdin)['access_token'])")
+
 curl -X POST http://localhost:8000/save_analysis \
+     -H "Authorization: Bearer $TOKEN" \
      -H "Content-Type: application/json" \
      -d '{"algo": "bubble_sort", "step": 100, "n_max": 1000}'
 ```
 
-Records live in the `analyses` table of `analyses.db` in the project folder.
-The table is created automatically when the server starts. To use a
+Without a valid token the endpoint returns `401 Unauthorized` and saves
+nothing:
+
+| Condition | Body |
+|---|---|
+| No `Authorization` header, or no `Bearer` prefix | `{"error": "I don't know you", "detail": "..."}` |
+| Malformed token or bad signature | `{"error": "I don't know you", "detail": "..."}` |
+| Token for a user that no longer exists | `{"error": "I don't know you", "detail": "User no longer exists"}` |
+| Expired token | `{"error": "Bye", "detail": "Token has expired"}` |
+
+Tokens are signed with the `JWT_SECRET_KEY` environment variable. Without
+it, the server falls back to a built-in development key, which anyone
+reading this code could use to forge tokens. Set your own key before the
+server is reachable by anyone else:
+
+```bash
+export JWT_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_hex(32))')"
+```
+
+Records live in the `analyses` table of `analyses.db` in the project folder,
+and accounts live in the `users` table. Both tables are created
+automatically when the server starts. To use a
 different database, set the `DATABASE_URL` environment variable to any
 SQLAlchemy URL, for example `postgresql://user:pass@localhost/dsa`.
 

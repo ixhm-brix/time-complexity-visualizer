@@ -1,9 +1,10 @@
-"""SQLite storage for saved analyses, via the SQLAlchemy ORM."""
+"""SQLite storage for users and saved analyses, via the SQLAlchemy ORM."""
 import os
 from datetime import datetime
 
 from sqlalchemy import JSON, DateTime, Integer, String, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
+from werkzeug.security import check_password_hash, generate_password_hash
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "analyses.db")
 DATABASE_URL = os.environ.get("DATABASE_URL", f"sqlite:///{DB_PATH}")
@@ -43,6 +44,21 @@ class Analysis(Base):
             "image_base64": self.image_base64,
             "created_at": self.created_at.isoformat(),
         }
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(256))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
 
 
 def init_db():

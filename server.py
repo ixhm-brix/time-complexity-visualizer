@@ -1,20 +1,91 @@
 import base64
 import io
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import matplotlib.pyplot as plt
 from flask import Flask, jsonify, request
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required
+from sqlalchemy import select
 
 from Algorithm import time_complexity_visualizer
 from algorithms import ALGORITHMS
-from database import Analysis, SessionLocal, init_db
+from database import Analysis, SessionLocal, User, init_db
 
 app = Flask(__name__)
+# Set JWT_SECRET_KEY in the environment for anything beyond local development.
+app.config["JWT_SECRET_KEY"] = os.environ.get(
+    "JWT_SECRET_KEY", "dev-only-secret-change-me-in-production-0123456789"
+)
+app.config["JWT_TOKEN_LOCATION"] = ["headers"]  # Authorization: Bearer <token>
+app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(hours=1)
+jwt = JWTManager(app)
 
 SNAPSHOT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "snapshots")
 os.makedirs(SNAPSHOT_DIR, exist_ok=True)
 init_db()
+
+
+# Every JWT failure is a 401. Flask-JWT-Extended would otherwise answer a
+# malformed token with 422.
+@jwt.unauthorized_loader
+def missing_token(reason):
+    return jsonify(error="I don't know you", detail=reason), 401
+
+
+@jwt.invalid_token_loader
+def invalid_token(reason):
+    return jsonify(error="I don't know you", detail=reason), 401
+
+
+@jwt.expired_token_loader
+def expired_token(jwt_header, jwt_payload):
+    return jsonify(error="Bye", detail="Token has expired"), 401
+
+
+@jwt.user_lookup_loader
+def load_user(jwt_header, jwt_payload):
+    with SessionLocal() as session:
+        return session.get(User, int(jwt_payload["sub"]))
+
+
+@jwt.user_lookup_error_loader
+def unknown_user(jwt_header, jwt_payload):
+    return jsonify(error="I don't know you", detail="User no longer exists"), 401
+
+
+def read_credentials():
+    body = request.get_json(silent=True) or {}
+    username = body.get("username")
+    password = body.get("password")
+    if not isinstance(username, str) or not username.strip():
+        raise ValidationError("'username' is required")
+    if not isinstance(password, str) or not password:
+        raise ValidationError("'password' is required")
+    return username.strip(), password
+
+
+@app.route("/register", methods=["POST"])
+def register():
+    username, password = read_credentials()
+    with SessionLocal.begin() as session:
+        taken = session.scalar(select(User).where(User.username == username))
+        if taken:
+            return jsonify(error=f"Username '{username}' is already taken"), 409
+        user = User(username=username)
+        user.set_password(password)
+        session.add(user)
+    return jsonify(id=user.id, username=user.username), 201
+
+
+@app.route("/login", methods=["POST"])
+def login():
+    username, password = read_credentials()
+    with SessionLocal() as session:
+        user = session.scalar(select(User).where(User.username == username))
+    if user is None or not user.check_password(password):
+        return jsonify(error="Invalid username or password"), 401
+    return jsonify(access_token=create_access_token(identity=str(user.id)))
 
 
 class ValidationError(Exception):
@@ -96,9 +167,11 @@ def analyze():
 
 
 @app.route("/save_analysis", methods=["POST"])
+@jwt_required()
 def save_analysis():
     """Run an analysis and store the result in the database.
 
+    Requires an "Authorization: Bearer <token>" header from /login.
     Parameters come from a JSON body, falling back to the query string.
     """
     params = request.get_json(silent=True) or request.args
